@@ -48,6 +48,9 @@ var (
 	// DefaultFirstColumnFormatter specifies the default Formatter for the first column cells.
 	DefaultFirstColumnFormatter Formatter
 
+	// DefaultColumnFormatters
+	DefaultColumnFormatters Formatter
+
 	// DefaultWidthFunc specifies the default WidthFunc for calculating column widths
 	DefaultWidthFunc WidthFunc = utf8.RuneCountInString
 
@@ -125,6 +128,7 @@ type WidthFunc func(string) int
 type Table interface {
 	WithHeaderFormatter(f Formatter) Table
 	WithFirstColumnFormatter(f Formatter) Table
+	WithColumnFormatters(i int, f Formatter) Table
 	WithPadding(p int) Table
 	WithWriter(w io.Writer) Table
 	WithWidthFunc(f WidthFunc) Table
@@ -140,12 +144,22 @@ type Table interface {
 // of columns is fixed at this point to len(columnHeaders) and the defined defaults
 // are set on the instance.
 func New(columnHeaders ...interface{}) Table {
-	t := table{header: make([]string, len(columnHeaders))}
+	tableWidth := len(columnHeaders)
+
+	t := table{
+		header:           make([]string, tableWidth),
+		ColumnFormatters: make([]Formatter, tableWidth),
+	}
 
 	t.WithPadding(DefaultPadding)
 	t.WithWriter(DefaultWriter)
 	t.WithHeaderFormatter(DefaultHeaderFormatter)
 	t.WithFirstColumnFormatter(DefaultFirstColumnFormatter)
+
+	for i := range columnHeaders {
+		t.WithColumnFormatters(i, DefaultFirstColumnFormatter)
+	}
+
 	t.WithWidthFunc(DefaultWidthFunc)
 	t.WithPrintHeaders(DefaultPrintHeaders)
 
@@ -158,6 +172,7 @@ func New(columnHeaders ...interface{}) Table {
 
 type table struct {
 	FirstColumnFormatter Formatter
+	ColumnFormatters     []Formatter
 	HeaderFormatter      Formatter
 	Padding              int
 	Writer               io.Writer
@@ -182,6 +197,11 @@ func (t *table) WithHeaderSeparatorRow(r rune) Table {
 
 func (t *table) WithFirstColumnFormatter(f Formatter) Table {
 	t.FirstColumnFormatter = f
+	return t
+}
+
+func (t *table) WithColumnFormatters(i int, f Formatter) Table {
+	t.ColumnFormatters[i] = f
 	return t
 }
 
@@ -252,13 +272,13 @@ func (t *table) Print() {
 	format := strings.Repeat("%s", len(t.header)) + "\n"
 	t.calculateWidths()
 
-  if t.PrintHeaders {
-    t.printHeader(format)
+	if t.PrintHeaders {
+		t.printHeader(format)
 
-    if t.HeaderSeparatorRune != 0 {
-      t.printHeaderSeparator(format)
-    }
-  }
+		if t.HeaderSeparatorRune != 0 {
+			t.printHeaderSeparator(format)
+		}
+	}
 
 	for _, row := range t.rows {
 		t.printRow(format, row)
@@ -308,8 +328,10 @@ func (t *table) printHeader(format string) {
 func (t *table) printRow(format string, row []string) {
 	vals := t.applyWidths(row, t.widths)
 
-	if t.FirstColumnFormatter != nil {
-		vals[0] = t.FirstColumnFormatter("%s", vals[0])
+	for i, formatter := range t.ColumnFormatters {
+		if formatter != nil {
+			vals[i] = formatter("%s", vals[i])
+		}
 	}
 
 	fmt.Fprintf(t.Writer, format, vals...)
